@@ -85,6 +85,9 @@ def create_handler(app: Careflow):
         def do_POST(self):
             self.dispatch()
 
+        def do_PUT(self):
+            self.dispatch()
+
         def do_PATCH(self):
             self.dispatch()
 
@@ -212,10 +215,58 @@ def create_handler(app: Careflow):
                 data = self.body()
                 return app.clinical_flags.review(clinic_id, actor_id, segments[1], data.get("expected_version", 0),
                                                  segments[2], data.get("note", "")), 200
-            if len(segments) == 3 and segments[0] == "incidents" and self.command == "POST":
+            if segments[:1] == ["incidents"] and self.command == "POST" and len(segments) in (2, 3):
                 data = self.body()
-                return app.transition_incident(clinic_id, actor_id, segments[1], segments[2], data.get("note", ""),
+                action = segments[1] if len(segments) == 2 else segments[2]
+                if action == "scan":
+                    return app.incident_responses.scan(clinic_id, actor_id, as_of=data.get("as_of"),
+                                                       limit=data.get("limit", 200)), 200
+                if action == "rehearse":
+                    return app.incident_responses.rehearse(clinic_id, actor_id, data.get("as_of", ""),
+                                                           limit=data.get("limit", 200)), 200
+                if len(segments) == 2:
+                    return {"error": {"code": "not_found", "message": "接口不存在"}}, 404
+                incident_id = segments[1]
+                if action == "pause-clock":
+                    return app.incident_responses.pause_clock(clinic_id, actor_id, incident_id, data.get("reason", ""),
+                                                              data.get("expected_version", 0)), 200
+                if action == "resume-clock":
+                    return app.incident_responses.resume_clock(clinic_id, actor_id, incident_id, data.get("reason", ""),
+                                                               data.get("expected_version", 0)), 200
+                if action == "transfer":
+                    return app.incident_responses.transfer(clinic_id, actor_id, incident_id, data.get("to_staff_id", ""),
+                                                           data.get("note", ""), data.get("expected_version", 0)), 201
+                if action == "reclassify":
+                    return app.incident_responses.reclassify(clinic_id, actor_id, incident_id, data.get("severity", ""),
+                                                             data.get("note", ""), data.get("expected_version", 0)), 200
+                return app.transition_incident(clinic_id, actor_id, incident_id, action, data.get("note", ""),
                                                data.get("expected_version", 0), assign_to=data.get("assign_to")), 200
+            if self.command == "GET" and segments == ["incidents", "worklist"]:
+                params = parse_qs(path.query)
+                return app.incident_responses.worklist(clinic_id, actor_id,
+                                                       as_of=params.get("as_of", [None])[0],
+                                                       limit=int(params.get("limit", [200])[0])), 200
+            if self.command == "GET" and len(segments) == 3 and segments[0] == "incidents" and segments[2] == "timer-history":
+                return app.incident_responses.timer_history(clinic_id, actor_id, segments[1]), 200
+            if self.command in {"GET", "PUT"} and segments == ["config", "incident-calendar"]:
+                if self.command == "GET":
+                    return app.incident_responses.get_calendar(clinic_id, actor_id), 200
+                data = self.body()
+                return app.incident_responses.put_calendar(clinic_id, actor_id, data.get("config", {}),
+                                                           data.get("expected_version", 0)), 200
+            if self.command in {"GET", "PUT"} and segments == ["config", "incident-policy"]:
+                if self.command == "GET":
+                    return app.incident_responses.get_policy(clinic_id, actor_id), 200
+                data = self.body()
+                return app.incident_responses.put_policy(clinic_id, actor_id, data.get("config", {}),
+                                                         data.get("expected_version", 0)), 200
+            if self.command == "GET" and segments == ["duty-assignments"]:
+                return app.incident_responses.list_duty(clinic_id, actor_id), 200
+            if self.command == "POST" and segments == ["duty-assignments"]:
+                data = self.body()
+                return app.incident_responses.set_duty(clinic_id, actor_id, data.get("staff_id", ""),
+                                                       data.get("starts_at", ""), data.get("ends_at", ""),
+                                                       data.get("note")), 201
             if len(segments) == 3 and segments[0] == "patients" and segments[2] == "timeline" and self.command == "GET":
                 params = parse_qs(path.query)
                 return app.patient_timeline(clinic_id, actor_id, segments[1], limit=int(params.get("limit", [100])[0])), 200

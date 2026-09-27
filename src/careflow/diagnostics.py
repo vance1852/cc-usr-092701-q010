@@ -48,6 +48,7 @@ class ConsistencyChecker:
         self.check_encounter_completion()
         self.check_followup_leases()
         self.check_incident_ledger()
+        self.check_incident_escalations()
         self.check_signed_records()
         self.check_duplicate_active_reservations()
         chain = audit.verify_chain(self.connection, self.clinic_id)
@@ -186,6 +187,31 @@ class ConsistencyChecker:
                 self.add("incident.version_gap", "high", "incident", row["id"],
                          {"state": row["state"], "version": row["version"], "last_event_sequence": row["last_sequence"],
                           "last_event_type": last["event_type"]}, "核對事件版本與每次處置的審計記錄。")
+
+    def check_incident_escalations(self) -> None:
+        rows = self.connection.execute(
+            "SELECT i.id AS incident_id,i.patient_id,i.assigned_to,s.phase,s.timer_state,s.deadline_at,s.escalation_level "
+            "FROM incidents i JOIN incident_slas s ON s.incident_id=i.id JOIN patients p ON p.id=i.patient_id "
+            "WHERE p.clinic_id=? AND i.state NOT IN ('resolved','closed') AND s.timer_state='running' AND s.deadline_at<=?",
+            (self.clinic_id, self.as_of)).fetchall()
+        for row in rows:
+            fired = self.connection.execute(
+                "SELECT stage_index FROM incident_escalations WHERE incident_id=? AND phase=? AND outcome='fired' "
+                "ORDER BY stage_index", (row["incident_id"], row["phase"])).fetchall()
+            if not fired:
+                self.add("incident.escalation_overdue_unscanned", "high", "incident", row["incident_id"],
+                         {"patient_id": row["patient_id"], "phase": row["phase"], "deadline_at": row["deadline_at"],
+                          "assigned_to": row["assigned_to"]},
+                         "立即执行一次超时扫描确认当前负责人已被提醒，并核对调度器是否按计划运行。")
+        deferred = self.connection.execute(
+            "SELECT e.incident_id,i.patient_id,e.phase,e.stage_index,e.due_at,e.created_at FROM incident_escalations e "
+            "JOIN incidents i ON i.id=e.incident_id JOIN patients p ON p.id=i.patient_id "
+            "WHERE p.clinic_id=? AND e.outcome='deferred'", (self.clinic_id,)).fetchall()
+        for row in deferred:
+            self.add("incident.escalation_without_duty_clinician", "high", "incident", row["incident_id"],
+                     {"patient_id": row["patient_id"], "phase": row["phase"], "stage_index": row["stage_index"],
+                      "due_at": row["due_at"], "deferred_since": row["created_at"]},
+                     "事件已到升级时刻但没有在岗值班临床负责人；尽快补排值班后重新扫描，系统只升级一次该阶段。")
 
     def check_signed_records(self) -> None:
         rows = self.connection.execute(

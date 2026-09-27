@@ -16,7 +16,8 @@ ROLE_PERMISSIONS = {
                   "appointment:write", "incident:report", "incident:manage", "followup:manage", "audit:patient"},
     "nurse": {"patient:read", "clinical:read", "clinical:write", "consent:read", "appointment:read", "appointment:write",
               "incident:report", "incident:manage", "followup:manage", "audit:patient"},
-    "coordinator": {"patient:read", "patient:write", "consent:read", "appointment:read", "appointment:write", "followup:manage"},
+    "coordinator": {"patient:read", "patient:write", "consent:read", "appointment:read", "appointment:write",
+                    "followup:manage", "incident:oversee"},
     "auditor": {"audit:read", "patient:read", "clinical:read", "billing:read", "data:export"},
 }
 

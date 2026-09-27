@@ -341,12 +341,105 @@ CREATE TABLE IF NOT EXISTS incident_events (
     id TEXT PRIMARY KEY,
     incident_id TEXT NOT NULL REFERENCES incidents(id),
     event_type TEXT NOT NULL,
-    actor_id TEXT NOT NULL REFERENCES staff(id),
+    actor_id TEXT REFERENCES staff(id),
     note TEXT NOT NULL,
     created_at TEXT NOT NULL,
     sequence INTEGER NOT NULL,
     UNIQUE(incident_id,sequence)
 );
+CREATE TABLE IF NOT EXISTS business_calendars (
+    clinic_id TEXT PRIMARY KEY REFERENCES clinics(id),
+    config_json TEXT NOT NULL,
+    updated_by TEXT REFERENCES staff(id),
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS incident_policies (
+    clinic_id TEXT PRIMARY KEY REFERENCES clinics(id),
+    config_json TEXT NOT NULL,
+    updated_by TEXT REFERENCES staff(id),
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS duty_assignments (
+    id TEXT PRIMARY KEY,
+    clinic_id TEXT NOT NULL REFERENCES clinics(id),
+    staff_id TEXT NOT NULL REFERENCES staff(id),
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    note TEXT,
+    created_by TEXT REFERENCES staff(id),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS duty_window ON duty_assignments(clinic_id,starts_at,ends_at);
+CREATE TABLE IF NOT EXISTS incident_slas (
+    incident_id TEXT PRIMARY KEY REFERENCES incidents(id),
+    clinic_id TEXT NOT NULL REFERENCES clinics(id),
+    timezone TEXT NOT NULL,
+    phase TEXT NOT NULL CHECK(phase IN ('response','handling','done')),
+    timer_state TEXT NOT NULL CHECK(timer_state IN ('running','paused','stopped')),
+    armed_at TEXT NOT NULL,
+    acknowledged_at TEXT,
+    acknowledged_by TEXT REFERENCES staff(id),
+    paused_at TEXT,
+    resolved_at TEXT,
+    deadline_at TEXT NOT NULL,
+    current_severity TEXT NOT NULL CHECK(current_severity IN ('low','moderate','high','urgent')),
+    max_severity TEXT NOT NULL CHECK(max_severity IN ('low','moderate','high','urgent')),
+    escalation_level INTEGER NOT NULL DEFAULT 0,
+    policy_json TEXT NOT NULL,
+    policy_version INTEGER NOT NULL DEFAULT 0,
+    calendar_json TEXT NOT NULL,
+    calendar_version INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS incident_sla_queue ON incident_slas(clinic_id,timer_state,deadline_at);
+CREATE TABLE IF NOT EXISTS incident_timer_segments (
+    id TEXT PRIMARY KEY,
+    incident_id TEXT NOT NULL REFERENCES incidents(id),
+    sequence INTEGER NOT NULL,
+    phase TEXT NOT NULL CHECK(phase IN ('response','handling')),
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    basis TEXT NOT NULL,
+    actor_id TEXT REFERENCES staff(id),
+    UNIQUE(incident_id,sequence)
+);
+CREATE TABLE IF NOT EXISTS incident_escalations (
+    id TEXT PRIMARY KEY,
+    clinic_id TEXT NOT NULL REFERENCES clinics(id),
+    incident_id TEXT NOT NULL REFERENCES incidents(id),
+    phase TEXT NOT NULL CHECK(phase IN ('response','handling')),
+    stage_index INTEGER NOT NULL,
+    stage_kind TEXT NOT NULL CHECK(stage_kind IN ('remind','escalate')),
+    stage_target TEXT NOT NULL CHECK(stage_target IN ('assignee','duty_clinician')),
+    deadline_at TEXT NOT NULL,
+    offset_minutes INTEGER NOT NULL,
+    due_at TEXT NOT NULL,
+    fired_at TEXT,
+    target_staff_id TEXT REFERENCES staff(id),
+    outcome TEXT NOT NULL CHECK(outcome IN ('fired','deferred')),
+    scan_batch TEXT,
+    basis TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(incident_id,phase,stage_index)
+);
+CREATE INDEX IF NOT EXISTS incident_escalations_outcome ON incident_escalations(clinic_id,outcome,phase,stage_index);
+CREATE TABLE IF NOT EXISTS incident_transfers (
+    id TEXT PRIMARY KEY,
+    clinic_id TEXT NOT NULL REFERENCES clinics(id),
+    incident_id TEXT NOT NULL REFERENCES incidents(id),
+    from_assignee TEXT REFERENCES staff(id),
+    to_assignee TEXT NOT NULL REFERENCES staff(id),
+    deadline_at TEXT NOT NULL,
+    remaining_business_minutes REAL NOT NULL,
+    overdue_business_minutes REAL NOT NULL,
+    handover_json TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES staff(id),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS incident_transfers_incident ON incident_transfers(incident_id,created_at);
 CREATE TABLE IF NOT EXISTS idempotency (
     scope TEXT NOT NULL,
     key TEXT NOT NULL,

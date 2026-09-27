@@ -37,11 +37,13 @@ class Careflow:
         from .exports import PatientExportService
         from .milestones import MilestoneService
         from .clinical_flags import ClinicalFlagService
+        from .incident_response import IncidentResponseService
         self.supplies = SupplyService(self.db, self.clock)
         self.reports = ReportService(self.db, self.clock)
         self.exports = PatientExportService(self.db, self.clock)
         self.milestones = MilestoneService(self.db, self.clock)
         self.clinical_flags = ClinicalFlagService(self.db, self.clock)
+        self.incident_responses = IncidentResponseService(self.db, self.clock)
 
     def now(self) -> str:
         return timestamp(self.clock.now())
@@ -917,6 +919,8 @@ class Careflow:
             audit.append_event(connection, clinic_id=clinic_id, actor_id=actor_id, patient_id=patient_id,
                                aggregate_type="incident", aggregate_id=incident_id, action="incident.reported",
                                occurred_at=now, payload={"severity": severity, "category": category})
+            self.incident_responses.arm(connection, clinic_id=clinic_id, incident_id=incident_id,
+                                        patient_id=patient_id, severity=severity, now=now, actor_id=actor_id)
             row = connection.execute("SELECT * FROM incidents WHERE id=?", (incident_id,)).fetchone()
         return self._incident_result(row, replayed=False)
 
@@ -958,6 +962,9 @@ class Careflow:
             audit.append_event(connection, clinic_id=clinic_id, actor_id=actor_id, patient_id=row["patient_id"],
                                aggregate_type="incident", aggregate_id=incident_id, action=f"incident.{action}",
                                occurred_at=now, payload={"from": row["state"], "to": after, "note": note, "assigned_to": assign_to})
+            self.incident_responses.after_state_change(
+                connection, clinic_id=clinic_id, incident_id=incident_id, previous_state=row["state"],
+                action=action, actor_id=actor_id, now=now)
         return {"id": incident_id, "state": after, "version": version, "assigned_to": assign_to or row["assigned_to"]}
 
     def incident_history(self, clinic_id: str, actor_id: str, incident_id: str) -> dict[str, Any]:
