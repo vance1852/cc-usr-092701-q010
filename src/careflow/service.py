@@ -37,11 +37,13 @@ class Careflow:
         from .exports import PatientExportService
         from .milestones import MilestoneService
         from .clinical_flags import ClinicalFlagService
+        from .incident_sla import IncidentSlaService
         self.supplies = SupplyService(self.db, self.clock)
         self.reports = ReportService(self.db, self.clock)
         self.exports = PatientExportService(self.db, self.clock)
         self.milestones = MilestoneService(self.db, self.clock)
         self.clinical_flags = ClinicalFlagService(self.db, self.clock)
+        self.incident_sla = IncidentSlaService(self.db, self.clock)
 
     def now(self) -> str:
         return timestamp(self.clock.now())
@@ -914,6 +916,8 @@ class Careflow:
                 (incident_id, patient_id, plan_id, encounter_id, severity, category, onset, now, actor_id, summary, key))
             connection.execute("INSERT INTO incident_events(id,incident_id,event_type,actor_id,note,created_at,sequence) VALUES(?,?,'reported',?,?,?,1)",
                                (new_id("iev"), incident_id, actor_id, summary, now))
+            self.incident_sla.open_for_incident(connection, clinic_id=clinic_id, incident_id=incident_id,
+                                                severity=severity, opened_at=now)
             audit.append_event(connection, clinic_id=clinic_id, actor_id=actor_id, patient_id=patient_id,
                                aggregate_type="incident", aggregate_id=incident_id, action="incident.reported",
                                occurred_at=now, payload={"severity": severity, "category": category})
@@ -955,6 +959,9 @@ class Careflow:
             sequence = connection.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM incident_events WHERE incident_id=?", (incident_id,)).fetchone()[0]
             connection.execute("INSERT INTO incident_events(id,incident_id,event_type,actor_id,note,created_at,sequence) VALUES(?,?,?,?,?,?,?)",
                                (new_id("iev"), incident_id, action, actor_id, note, now, sequence))
+            self.incident_sla.on_state_transition(
+                connection, clinic_id=clinic_id, incident_id=incident_id, from_state=row["state"],
+                to_state=after, actor_id=actor_id, note=note, at=now)
             audit.append_event(connection, clinic_id=clinic_id, actor_id=actor_id, patient_id=row["patient_id"],
                                aggregate_type="incident", aggregate_id=incident_id, action=f"incident.{action}",
                                occurred_at=now, payload={"from": row["state"], "to": after, "note": note, "assigned_to": assign_to})

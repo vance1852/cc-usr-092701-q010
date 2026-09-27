@@ -11,7 +11,7 @@ from typing import Iterator
 
 from .errors import StorageFailure
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -341,10 +341,121 @@ CREATE TABLE IF NOT EXISTS incident_events (
     id TEXT PRIMARY KEY,
     incident_id TEXT NOT NULL REFERENCES incidents(id),
     event_type TEXT NOT NULL,
-    actor_id TEXT NOT NULL REFERENCES staff(id),
+    actor_id TEXT REFERENCES staff(id),
     note TEXT NOT NULL,
     created_at TEXT NOT NULL,
     sequence INTEGER NOT NULL,
+    UNIQUE(incident_id,sequence)
+);
+CREATE TABLE IF NOT EXISTS clinic_oncall_default (
+    clinic_id TEXT PRIMARY KEY REFERENCES clinics(id),
+    staff_id TEXT NOT NULL REFERENCES staff(id),
+    updated_by TEXT REFERENCES staff(id),
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS clinic_calendar (
+    clinic_id TEXT PRIMARY KEY REFERENCES clinics(id),
+    weekly_hours_json TEXT NOT NULL,
+    exceptions_json TEXT NOT NULL,
+    updated_by TEXT REFERENCES staff(id),
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS incident_sla_policies (
+    clinic_id TEXT NOT NULL REFERENCES clinics(id),
+    severity TEXT NOT NULL CHECK(severity IN ('low','moderate','high','urgent')),
+    response_minutes INTEGER NOT NULL CHECK(response_minutes BETWEEN 1 AND 100000),
+    escalation_grace_minutes INTEGER NOT NULL CHECK(escalation_grace_minutes BETWEEN 0 AND 100000),
+    active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+    updated_by TEXT REFERENCES staff(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY(clinic_id,severity)
+);
+CREATE TABLE IF NOT EXISTS on_call_roster (
+    id TEXT PRIMARY KEY,
+    clinic_id TEXT NOT NULL REFERENCES clinics(id),
+    staff_id TEXT NOT NULL REFERENCES staff(id),
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL REFERENCES staff(id),
+    created_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    CHECK(ends_at>starts_at)
+);
+CREATE INDEX IF NOT EXISTS on_call_clinic_window ON on_call_roster(clinic_id,starts_at,ends_at);
+CREATE TABLE IF NOT EXISTS incident_slas (
+    incident_id TEXT PRIMARY KEY REFERENCES incidents(id),
+    clinic_id TEXT NOT NULL REFERENCES clinics(id),
+    severity TEXT NOT NULL,
+    reported_severity TEXT NOT NULL,
+    policy_version INTEGER NOT NULL,
+    response_minutes INTEGER NOT NULL,
+    escalation_grace_minutes INTEGER NOT NULL,
+    budget_seconds INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('running','paused','stopped','acknowledged')),
+    escalation_stage TEXT NOT NULL CHECK(escalation_stage IN ('none','reminded','escalated')),
+    opened_at TEXT NOT NULL,
+    running_from TEXT,
+    elapsed_seconds INTEGER NOT NULL DEFAULT 0,
+    remaining_seconds INTEGER NOT NULL DEFAULT 0,
+    deadline_at TEXT,
+    escalate_after_at TEXT,
+    paused_at TEXT,
+    closed_at TEXT,
+    escalated_to TEXT REFERENCES staff(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS incident_slas_clinic ON incident_slas(clinic_id,deadline_at,escalation_stage,status);
+CREATE TABLE IF NOT EXISTS incident_sla_timeline (
+    id TEXT PRIMARY KEY,
+    incident_id TEXT NOT NULL REFERENCES incidents(id),
+    sequence INTEGER NOT NULL,
+    segment TEXT NOT NULL CHECK(segment IN ('running','paused','stopped','acknowledged')),
+    action TEXT NOT NULL CHECK(action IN ('open','pause','resume','stop','acknowledge','remind','escalate','reassign','severity_revision')),
+    actor_id TEXT REFERENCES staff(id),
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    business_elapsed INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL,
+    basis_json TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    UNIQUE(incident_id,sequence)
+);
+CREATE TABLE IF NOT EXISTS incident_sla_escalations (
+    incident_id TEXT NOT NULL REFERENCES incidents(id),
+    stage TEXT NOT NULL CHECK(stage IN ('reminded','escalated')),
+    assignee_id TEXT,
+    due_at TEXT NOT NULL,
+    fired_at TEXT NOT NULL,
+    nonce TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(incident_id,stage)
+);
+CREATE TABLE IF NOT EXISTS incident_handoffs (
+    id TEXT PRIMARY KEY,
+    incident_id TEXT NOT NULL REFERENCES incidents(id),
+    sequence INTEGER NOT NULL,
+    from_assignee TEXT REFERENCES staff(id),
+    to_assignee TEXT NOT NULL REFERENCES staff(id),
+    actor_id TEXT REFERENCES staff(id),
+    severity TEXT NOT NULL,
+    incident_state TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    reported_at TEXT NOT NULL,
+    reported_by TEXT NOT NULL,
+    actions_json TEXT NOT NULL,
+    remaining_business_minutes INTEGER NOT NULL,
+    deadline_at TEXT NOT NULL,
+    escalate_after_at TEXT,
+    escalation_stage TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     UNIQUE(incident_id,sequence)
 );
 CREATE TABLE IF NOT EXISTS idempotency (

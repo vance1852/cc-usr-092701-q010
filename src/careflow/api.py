@@ -214,8 +214,56 @@ def create_handler(app: Careflow):
                                                  segments[2], data.get("note", "")), 200
             if len(segments) == 3 and segments[0] == "incidents" and self.command == "POST":
                 data = self.body()
-                return app.transition_incident(clinic_id, actor_id, segments[1], segments[2], data.get("note", ""),
+                action = segments[2]
+                if action == "reassign":
+                    return app.incident_sla.reassign(clinic_id, actor_id, segments[1], data.get("to_staff_id", ""),
+                                                     data.get("reason", ""), data.get("expected_version", 0)), 200
+                if action == "severity":
+                    return app.incident_sla.revise_severity(clinic_id, actor_id, segments[1], data.get("severity", ""),
+                                                            data.get("note", ""), data.get("expected_version", 0)), 200
+                return app.transition_incident(clinic_id, actor_id, segments[1], action, data.get("note", ""),
                                                data.get("expected_version", 0), assign_to=data.get("assign_to")), 200
+            if len(segments) == 4 and segments[0] == "incidents" and segments[2] == "sla" and self.command == "POST":
+                data = self.body()
+                if segments[3] == "pause":
+                    return app.incident_sla.pause_timer(clinic_id, actor_id, segments[1], data.get("reason", "")), 200
+                if segments[3] == "resume":
+                    return app.incident_sla.resume_timer(clinic_id, actor_id, segments[1], data.get("reason", "")), 200
+            if len(segments) == 3 and segments[0] == "incidents" and segments[2] == "sla" and self.command == "GET":
+                return app.incident_sla.status(clinic_id, actor_id, segments[1]), 200
+            if len(segments) == 3 and segments[0] == "incidents" and segments[2] == "handoffs" and self.command == "GET":
+                return app.incident_sla.list_handoffs(clinic_id, actor_id, segments[1]), 200
+            if self.command == "POST" and segments == ["incidents", "scan-due"]:
+                data = self.body()
+                return app.incident_sla.scan_due(clinic_id, actor_id, limit=data.get("limit", 200)), 200
+            if self.command == "GET" and segments == ["reports", "incident-queue"]:
+                params = parse_qs(path.query)
+                return app.incident_sla.queue(clinic_id, actor_id, limit=int(params.get("limit", [200])[0])), 200
+            if self.command == "GET" and segments == ["reports", "incident-simulation"]:
+                params = parse_qs(path.query)
+                return app.incident_sla.simulate(clinic_id, actor_id, params.get("as_of", [""])[0]), 200
+            if self.command in {"GET", "POST"} and segments == ["config", "calendar"]:
+                if self.command == "GET":
+                    return app.incident_sla.get_calendar(clinic_id, actor_id), 200
+                data = self.body()
+                return app.incident_sla.set_calendar(clinic_id, actor_id, data.get("weekly_hours", {}),
+                                                     data.get("exceptions", [])), 200
+            if self.command in {"GET", "POST"} and segments == ["config", "incident-sla-policies"]:
+                if self.command == "GET":
+                    return app.incident_sla.list_policies(clinic_id, actor_id), 200
+                data = self.body()
+                return app.incident_sla.put_policies(clinic_id, actor_id, data.get("policies", [])), 200
+            if self.command == "POST" and segments == ["oncall", "roster"]:
+                data = self.body()
+                return app.incident_sla.add_oncall(clinic_id, actor_id, data.get("staff_id", ""),
+                                                   data.get("starts_at", ""), data.get("ends_at", ""),
+                                                   data.get("note")), 201
+            if self.command == "POST" and segments == ["oncall", "default"]:
+                data = self.body()
+                return app.incident_sla.set_default_oncall(clinic_id, actor_id, data.get("staff_id", "")), 200
+            if self.command == "GET" and segments[:1] == ["oncall"]:
+                params = parse_qs(path.query)
+                return app.incident_sla.list_oncall(clinic_id, actor_id, at=params.get("at", [None])[0]), 200
             if len(segments) == 3 and segments[0] == "patients" and segments[2] == "timeline" and self.command == "GET":
                 params = parse_qs(path.query)
                 return app.patient_timeline(clinic_id, actor_id, segments[1], limit=int(params.get("limit", [100])[0])), 200
